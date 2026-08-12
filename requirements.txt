@@ -1,0 +1,6 @@
+# Python 3.10 이상 필요 (코드에서 `str | None` 같은 PEP 604 유니언 타입 힌트를 사용합니다)
+requests>=2.31,<3
+requests-cache>=1.1,<2
+beautifulsoup4>=4.12,<5
+lxml>=5.0,<6
+python-dotenv>=1.0,<2

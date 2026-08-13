@@ -11,6 +11,7 @@
 | 지역N문화 | 검색 API → 상세 API | 13건 | 자동 수집 가능 |
 | 한국민족문화대백과사전 | 등록한 개별 URL의 설화 섹션 파싱 | 2건 | 여수시·순천시 수집 가능 |
 | 한국향토문화전자대전 | 공공데이터포털 API 예정 | 0건 | API 명세·키 확인 필요 |
+| 관광지 심화 수집 | 공식·공공 페이지 + OpenStreetMap 반경 검색 | 실행 시 갱신 | 이순신광장·낙안읍성 수집 가능 |
 
 현재 건수는 2026-08-12 실행 결과입니다. 민속대백과사전은 정확도를 우선해
 표제어에 `여수`/`순천`이 들어가는 항목만 기본 수집합니다. 본문 검색 인덱스를
@@ -34,6 +35,7 @@ python crawler_folkency.py
 python crawler_nculture.py
 python crawler_encykorea.py
 python api_grandculture.py
+python crawler_destinations.py
 ```
 
 운영자 연락처를 User-Agent에 넣으려면 `.env.example`을 `.env`로 복사하고
@@ -59,6 +61,31 @@ python api_grandculture.py
   "데이터유형": "text"
 }
 ```
+
+`crawler_destinations.py`의 결과에는 방탈출 콘텐츠 선별을 돕기 위해 `관광지`,
+`지역`, `카테고리`, `정보성격`, `수집방식`, `게임활용태그`, `검수상태`가 추가됩니다.
+주변 장소에는 가능한 경우 `거리_m`, `위도`, `경도`도 포함됩니다.
+
+### 이순신광장·낙안읍성 심화 수집
+
+`crawler_destinations.py`는 다음 자료를 `output/destinations.json` 하나로 합칩니다.
+
+- 여수시·순천시의 선별 공식 페이지: 역사, 인물, 공간,
+  비문과 상징물, 관람 동선, 체험, 민속, 축제, 교통
+- OpenStreetMap Overpass 반경 검색: 이순신광장 1.5km, 낙안읍성 2km 안의 음식점,
+  상점, 시장, 숙박, 인접 관광지와 각 장소의 거리·좌표
+- 기존 `folkency.json`, `nculture.json`, `encykorea.json` 중 이순신·전라좌수영·
+  거북선·진남관·고소대 또는 낙안읍성·임경업·김빈길과 직접 관련된 항목
+
+영업시간, 휴무, 전화번호, 입장료, 행사 일정은 변동 정보로 분류되며 게임 공개나
+지역 가게와의 제휴 전에 공식 채널과 현장에서 다시 확인해야 합니다. 반경 검색은
+검색 결과나 상용 지도 화면을 긁지 않고 OpenStreetMap의 공개 Overpass API를
+사용하며, 결과에는 ODbL 출처 문구가 붙습니다. OpenStreetMap은 사용자 기여
+데이터이므로 누락이나 오래된 정보가 있을 수 있습니다. 편의점은 제외하고,
+관광지별로 가까운 먹거리 150건·상점 100건·숙박 40건·명소 80건을 상한으로
+두어 프랜차이즈와 과도한 주변 정보가 핵심 자료를 밀어내지 않게 했습니다.
+선별 페이지를 늘리려면 `crawler_destinations.py`의 `PAGE_SOURCES`에 공식 URL과
+카테고리를 추가하세요.
 
 ## 수집원별 주의사항
 

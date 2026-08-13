@@ -27,9 +27,9 @@ crawler_nculture.py
 허용(Disallow 없음)이라 접근에 문제가 없습니다.
 
 검색은 제목뿐 아니라 본문 전체를 대상으로 하므로 완도·신안처럼 무관한 지역이
-섞여 나올 수 있습니다(예: 다른 지역 이야기의 참고문헌에 "여수시사"가 인용된 경우).
-그래서 저장 직전에 항상 filter_by_region()으로 제목+본문에 "여수"/"순천"이
-실제로 있는 레코드만 남깁니다.
+섞여 나올 수 있습니다(예: 다른 지역 이야기에서 여수나 순천을 잠깐 언급한 경우).
+그래서 저장 직전에는 is_target_region_story()로 조사장소 또는 글 도입부에
+"여수시"/"순천시"가 명시된 레코드만 남깁니다.
 
 사용법:
     `py -3 crawler_nculture.py` 실행하면 REGION_KEYWORDS(config.py)에 정의된
@@ -37,13 +37,13 @@ crawler_nculture.py
     수행합니다. 별도로 URL을 채워 넣을 필요가 없습니다.
 """
 
+import re
 import sys
 
 from bs4 import BeautifulSoup
 
 from config import (
     REGION_KEYWORDS,
-    filter_by_region,
     install_cache,
     make_record,
     new_session,
@@ -67,6 +67,12 @@ STORY_PAGE_URL_TMPL = "https://ncms.nculture.org/traditional-stories/story/{id}"
 
 SEARCH_PAGE_SIZE = 50
 MAX_SEARCH_PAGES = 200
+
+TARGET_CITY_PATTERN = re.compile(r"(?:전라남도\s*)?(?:여수|순천)시")
+SURVEY_LOCATION_PATTERN = re.compile(
+    r"^\s*조사\s*장소\s*[:：]\s*(.+)$",
+    re.MULTILINE,
+)
 
 
 def discover_story_ids(session, keywords: tuple[str, ...] = REGION_KEYWORDS) -> list[int]:
@@ -154,6 +160,33 @@ def parse_story_detail(content: dict) -> tuple[str, str]:
     return title, "\n\n".join(parts)
 
 
+def is_target_region_story(record: dict) -> bool:
+    """
+    지역N문화 이야기의 실제 소재지가 여수시/순천시인지 보수적으로 판정합니다.
+
+    구술 채록 자료에 '조사장소'가 있으면 그 위치만 기준으로 삼습니다. 조사장소가
+    없는 해설형 자료는 제목과 첫 두 문단만 확인하여, 본문 중간에 다른 지역을
+    설명하며 여수/순천을 잠깐 언급한 자료가 통과하지 않게 합니다.
+    """
+    title = record.get("제목", "") or ""
+    body = record.get("본문", "") or ""
+
+    location_match = SURVEY_LOCATION_PATTERN.search(body)
+    if location_match:
+        return bool(TARGET_CITY_PATTERN.search(location_match.group(1)))
+
+    paragraphs = [
+        paragraph.strip()
+        for paragraph in re.split(r"\n\s*\n", body)
+        if paragraph.strip()
+    ]
+    introduction = "\n\n".join(paragraphs[:2])
+    return bool(
+        TARGET_CITY_PATTERN.search(title)
+        or TARGET_CITY_PATTERN.search(introduction)
+    )
+
+
 def crawl_one_story(session, story_id: int) -> dict | None:
     resp = session.get(STORY_DETAIL_URL_TMPL.format(id=story_id), timeout=15)
     resp.raise_for_status()
@@ -203,7 +236,8 @@ def main():
             failed += 1
             print(f"  [오류] story/{story_id} 처리 중 문제 발생: {e}")
 
-    kept, dropped = filter_by_region(all_records)
+    kept = [record for record in all_records if is_target_region_story(record)]
+    dropped = len(all_records) - len(kept)
     if dropped:
         print(f"  [필터] 여수/순천과 무관한 {dropped}건은 저장하지 않았습니다.")
 

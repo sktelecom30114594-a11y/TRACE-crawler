@@ -98,6 +98,40 @@ class NCultureParserTests(unittest.TestCase):
         self.assertEqual(title, "오동도 이야기")
         self.assertEqual(body, "[유래]\n\n여수에 전해지는 이야기다.")
 
+    def test_keeps_story_whose_introduction_identifies_suncheon(self):
+        record = {
+            "제목": "송광사 이야기",
+            "본문": (
+                "[순천시 송광면에 소재한 송광사]\n\n"
+                "전라남도 순천시 송광면에 송광사가 있다."
+            ),
+        }
+
+        self.assertTrue(crawler_nculture.is_target_region_story(record))
+
+    def test_rejects_gurye_story_with_incidental_suncheon_mention(self):
+        record = {
+            "제목": "정성으로 모신 조왕중발",
+            "본문": (
+                "조사장소 : 구례군 문척면 중산리\n\n"
+                "우리 순천 동서도 교회를 다닌다."
+            ),
+        }
+
+        self.assertFalse(crawler_nculture.is_target_region_story(record))
+
+    def test_rejects_other_region_with_later_yeosu_mention(self):
+        record = {
+            "제목": "가천 암수바위",
+            "본문": (
+                "남해군 남면 가천리에 바위가 있다.\n\n"
+                "마을 사람들이 제사를 지낸다.\n\n"
+                "어떤 사람이 여수에 다녀왔다."
+            ),
+        }
+
+        self.assertFalse(crawler_nculture.is_target_region_story(record))
+
 
 class GrandCultureConfigurationTests(unittest.TestCase):
     def test_skeleton_refuses_to_send_request(self):

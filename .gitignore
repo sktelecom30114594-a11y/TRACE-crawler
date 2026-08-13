@@ -4,5 +4,6 @@
 __pycache__/
 *.pyc
 http_cache.sqlite*
-output/
+output/*
+!output/*.json
 *.tmp

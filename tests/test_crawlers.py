@@ -4,6 +4,7 @@ from bs4 import BeautifulSoup
 
 import api_grandculture
 import crawler_encykorea
+import crawler_destinations
 import crawler_folkency
 import crawler_nculture
 
@@ -137,6 +138,65 @@ class GrandCultureConfigurationTests(unittest.TestCase):
     def test_skeleton_refuses_to_send_request(self):
         with self.assertRaises(NotImplementedError):
             api_grandculture._ensure_configured()
+
+
+class DestinationCrawlerTests(unittest.TestCase):
+    def test_extracts_focused_main_content_and_preserves_table_rows(self):
+        html = """
+        <html><head><meta property="og:title" content="낙안읍성 체험"></head>
+        <body>
+          <header>전체 메뉴 낙안읍성</header>
+          <main>
+            <h2>낙안읍성 일일상설체험</h2>
+            <p>전통 생활을 직접 체험합니다.</p>
+            <table><tr><th>프로그램</th><th>내용</th></tr>
+            <tr><td>옥사체험</td><td>나무수갑 체험</td></tr></table>
+          </main>
+          <footer>순천시 사이트 메뉴</footer>
+        </body></html>
+        """
+
+        body = crawler_destinations.extract_main_text(html, ("낙안읍성", "체험"))
+
+        self.assertIn("[낙안읍성 일일상설체험]", body)
+        self.assertIn("옥사체험 | 나무수갑 체험", body)
+        self.assertNotIn("전체 메뉴", body)
+        self.assertNotIn("사이트 메뉴", body)
+
+    def test_classifies_osm_restaurant_as_volatile_local_business(self):
+        tags = {"amenity": "restaurant", "cuisine": "korean"}
+
+        category, volatile = crawler_destinations.classify_nearby(tags)
+
+        self.assertEqual(category, "주변 지역 먹거리·가게")
+        self.assertTrue(volatile)
+
+    def test_builds_nearby_record_with_distance_and_coordinates(self):
+        destination = crawler_destinations.DESTINATIONS["여수 이순신광장"]
+        element = {
+            "type": "node",
+            "id": 123,
+            "lat": 34.74,
+            "lon": 127.73,
+            "tags": {
+                "name": "여수 지역가게",
+                "amenity": "restaurant",
+                "cuisine": "korean",
+                "addr:city": "여수시",
+                "addr:street": "중앙로",
+            },
+        }
+
+        record = crawler_destinations.nearby_record(destination, element)
+
+        self.assertEqual(record["관광지"], "여수 이순신광장")
+        self.assertIsInstance(record["거리_m"], int)
+        self.assertIn("여수 지역가게", record["제목"])
+        self.assertIn("사용자 기여", record["검수상태"])
+        self.assertEqual(
+            record["출처URL"],
+            "https://www.openstreetmap.org/node/123",
+        )
 
 
 if __name__ == "__main__":

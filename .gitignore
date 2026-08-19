@@ -6,4 +6,6 @@ __pycache__/
 http_cache.sqlite*
 output/*
 !output/*.json
+!output/naju_mokpo/
+!output/naju_mokpo/*.json
 *.tmp

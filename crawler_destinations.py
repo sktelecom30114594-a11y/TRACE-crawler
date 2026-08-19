@@ -1,31 +1,26 @@
 """
 여수 이순신광장·순천 낙안읍성 관광 콘텐츠 수집기.
 
-온라인 방탈출 게임 기획에 필요한 정보를 다음 세 갈래로 모읍니다.
+온라인 방탈출 게임 기획에 필요한 정보를 다음 두 갈래로 모읍니다.
 
 1. 지자체·공공기관의 선별된 페이지
    역사, 공간 구조, 상징물, 관람 동선, 체험, 행사, 교통을 수집합니다.
 2. OpenStreetMap Overpass의 반경 검색
    두 관광지 주변 음식점·상점·숙박·인접 명소를 거리와 좌표와 함께 수집합니다.
-3. 기존 TRACE 결과 재분류
-   이미 수집한 설화·민속 자료 중 두 장소와 직접 관련된 항목을 합칩니다.
-
 결과는 output/destinations.json에 저장됩니다. 음식점 영업시간, 전화번호, 행사와
 요금 같은 정보는 변동될 수 있으므로 레코드에 검수 상태를 별도로 표시합니다.
 """
 
 from __future__ import annotations
 
-import json
 import math
 import re
 from dataclasses import dataclass
-from pathlib import Path
 
 from bs4 import BeautifulSoup, Tag
 
 from config import (
-    BASE_DIR,
+    REGION_KEYWORDS,
     install_cache,
     make_record,
     new_session,
@@ -55,6 +50,7 @@ IRRELEVANT_SHOP_TYPES = {
     "beauty",
     "car",
     "car_repair",
+    "convenience",
     "electronics",
     "funeral_directors",
     "hairdresser",
@@ -72,7 +68,6 @@ class Destination:
     latitude: float
     longitude: float
     radius_m: int
-    match_terms: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -86,14 +81,13 @@ class PageSource:
     volatile: bool = False
 
 
-DESTINATIONS = {
+ALL_DESTINATIONS = {
     "여수 이순신광장": Destination(
         name="여수 이순신광장",
         region="여수",
         latitude=34.7399013049,
         longitude=127.7357348686,
         radius_m=1500,
-        match_terms=("이순신광장", "전라좌수영", "거북선", "진남관", "고소대"),
     ),
     "순천 낙안읍성": Destination(
         name="순천 낙안읍성",
@@ -101,14 +95,32 @@ DESTINATIONS = {
         latitude=34.9060980993,
         longitude=127.3417429744,
         radius_m=2000,
-        match_terms=("낙안읍성", "낙안 읍성", "임경업", "김빈길"),
     ),
+    "나주읍성": Destination(
+        name="나주읍성",
+        region="나주",
+        latitude=35.0328914,
+        longitude=126.7127045,
+        radius_m=2000,
+    ),
+    "목포진": Destination(
+        name="목포진",
+        region="목포",
+        latitude=34.78554678,
+        longitude=126.384413,
+        radius_m=2000,
+    ),
+}
+DESTINATIONS = {
+    name: destination
+    for name, destination in ALL_DESTINATIONS.items()
+    if destination.region in REGION_KEYWORDS
 }
 
 
 # 검색엔진 결과를 자동 수집하지 않고, 사람이 확인한 공식·공공 페이지만 요청합니다.
 # URL을 추가하면 같은 파서와 공통 스키마로 다음 실행부터 함께 수집됩니다.
-PAGE_SOURCES = (
+ALL_PAGE_SOURCES = (
     PageSource(
         "여수 이순신광장",
         "핵심 개요·공간",
@@ -282,6 +294,73 @@ PAGE_SOURCES = (
         ("낙안읍성", "체험"),
         True,
     ),
+    # 나주시청 공식 사이트(naju.go.kr)는 이 프로젝트의 네트워크에서 TCP 단계부터
+    # 응답이 없어(포트 443/80 모두 SYN 무응답) 접근이 막혀 있음을 확인했습니다.
+    # 대신 한국관광공사가 운영하는 공공 관광정보 사이트(대한민국 구석구석)의
+    # 나주읍성 관련 실제 기사로 대체했습니다. 실제 요청·파싱으로 검증했습니다.
+    PageSource(
+        "나주읍성",
+        "핵심 개요·역사·공간",
+        "https://korean.visitkorea.or.kr/detail/rem_detail.do?cotid=185a56c3-2853-41ff-b897-4bc635e30b28",
+        "대한민국 구석구석(한국관광공사)",
+        "나주 역사 여행 1번지, 나주읍성과 나주향교",
+        ("나주읍성",),
+    ),
+    PageSource(
+        "나주읍성",
+        "역사·설화·상징물",
+        "https://korean.visitkorea.or.kr/detail/rem_detail.do?cotid=b1de1f80-ad5d-4e3d-9175-e11148fbed04",
+        "대한민국 구석구석(한국관광공사)",
+        "나주읍성이 보낸 시간 여행 초대장",
+        ("나주읍성", "완사천"),
+    ),
+    PageSource(
+        "나주읍성",
+        "공간 구조·관람 동선",
+        "https://korean.visitkorea.or.kr/detail/rem_detail.do?cotid=eff52a70-7012-4dd0-9c55-b88cd58ad0a2",
+        "대한민국 구석구석(한국관광공사)",
+        "전통한옥마을, 나주읍성마을",
+        ("나주읍성",),
+    ),
+    PageSource(
+        "나주읍성",
+        "체험·게임 소재",
+        "https://korean.visitkorea.or.kr/detail/rem_detail.do?cotid=41f24cb6-0384-4ca5-a199-0eca81963e3e",
+        "대한민국 구석구석(한국관광공사)",
+        "나주읍성 살아보기",
+        ("나주읍성",),
+        True,
+    ),
+    PageSource(
+        "나주읍성",
+        "관광 동선·지역 먹거리",
+        "https://korean.visitkorea.or.kr/detail/rem_detail.do?cotid=d2c2c733-63d3-4a55-96e1-5a6b003c31bd",
+        "대한민국 구석구석(한국관광공사)",
+        "뚜벅이로 떠나는 나주 여행",
+        ("나주읍성", "나주"),
+        True,
+    ),
+    PageSource(
+        "목포진",
+        "역사·공간·체험",
+        "https://tour.mokpo.go.kr/tour/attraction/nineplace/mokpojin",
+        "목포문화관광",
+        "목포 역사의 시작, 목포진",
+        ("목포진", "수군"),
+        True,
+    ),
+    PageSource(
+        "목포진",
+        "관광 동선·근대 역사",
+        "https://tour.mokpo.go.kr/tour/citytour/day",
+        "목포문화관광",
+        "목포 주간시티투어",
+        ("근대역사관", "목포"),
+        True,
+    ),
+)
+PAGE_SOURCES = tuple(
+    source for source in ALL_PAGE_SOURCES if source.destination in DESTINATIONS
 )
 
 
@@ -321,10 +400,24 @@ def normalize_space(text: str) -> str:
     return re.sub(r"[ \t\r\f\v]+", " ", text or "").strip()
 
 
+def _is_blind_text_div(element: Tag) -> bool:
+    """스크린리더 전용 `.blind`(`sr-only`류) div. 시각적으로는 숨겨져 있지만
+    실제 본문 텍스트가 문단 태그 없이 그대로 들어있는 경우가 많은 공공사이트
+    접근성 관행이라, 문단/리스트 태그와 동등하게 본문 후보로 취급합니다."""
+    if element.name != "div":
+        return False
+    classes = element.get("class") or []
+    return any(cls in {"blind", "sr-only", "sr_only"} for cls in classes)
+
+
+def _is_content_block(element: Tag) -> bool:
+    return element.name in BLOCK_TAGS or _is_blind_text_div(element)
+
+
 def _is_nested_block(element: Tag, root: Tag) -> bool:
     parent = element.parent
     while isinstance(parent, Tag) and parent is not root:
-        if parent.name in BLOCK_TAGS:
+        if _is_content_block(parent):
             return True
         parent = parent.parent
     return False
@@ -333,7 +426,7 @@ def _is_nested_block(element: Tag, root: Tag) -> bool:
 def block_text(root: Tag) -> str:
     """본문 블록을 문단 단위로 직렬화하고 표의 셀은 ` | `로 구분합니다."""
     parts: list[str] = []
-    for element in root.find_all(list(BLOCK_TAGS)):
+    for element in root.find_all(_is_content_block):
         if _is_nested_block(element, root):
             continue
 
@@ -613,6 +706,41 @@ def nearby_record(destination: Destination, element: dict) -> dict | None:
     return record
 
 
+def deduplicate_nearby_records(
+    records: list[dict], max_distance_m: int = 50
+) -> tuple[list[dict], int]:
+    """같은 이름·분류이고 가까운 OSM 객체는 정보가 더 풍부한 하나만 남깁니다."""
+    kept: list[dict] = []
+    dropped = 0
+    for record in records:
+        title = normalize_space(record.get("제목", "")).casefold()
+        lat = record.get("위도")
+        lon = record.get("경도")
+        duplicate_index = None
+
+        if lat is not None and lon is not None:
+            for index, existing in enumerate(kept):
+                if normalize_space(existing.get("제목", "")).casefold() != title:
+                    continue
+                existing_lat = existing.get("위도")
+                existing_lon = existing.get("경도")
+                if existing_lat is None or existing_lon is None:
+                    continue
+                if distance_metres(lat, lon, existing_lat, existing_lon) <= max_distance_m:
+                    duplicate_index = index
+                    break
+
+        if duplicate_index is None:
+            kept.append(record)
+            continue
+
+        dropped += 1
+        if len(record.get("본문", "")) > len(kept[duplicate_index].get("본문", "")):
+            kept[duplicate_index] = record
+
+    return kept, dropped
+
+
 def crawl_nearby(session, destination: Destination) -> list[dict]:
     last_error: Exception | None = None
     for endpoint in OVERPASS_ENDPOINTS:
@@ -635,15 +763,18 @@ def crawl_nearby(session, destination: Destination) -> list[dict]:
                     continue
                 seen.add(key)
                 tags = element.get("tags") or {}
-                # 프랜차이즈 편의점이 지역 명물 후보를 밀어내지 않게 제외합니다.
+                # 프랜차이즈 편의점 등이 지역 명물 후보를 밀어내지 않게 제외합니다.
                 # 시장·전문점·독립 상점은 그대로 남깁니다.
-                if tags.get("shop") == "convenience" or tags.get("shop") in IRRELEVANT_SHOP_TYPES:
+                if tags.get("shop") in IRRELEVANT_SHOP_TYPES:
                     continue
                 record = nearby_record(destination, element)
                 if record:
                     records.append(record)
 
             records.sort(key=lambda record: record.get("거리_m", 0))
+            records, duplicate_count = deduplicate_nearby_records(records)
+            if duplicate_count:
+                print(f"    [중복 제거] 가까운 동일 장소 {duplicate_count}건 제외")
             selected = []
             counts: dict[str, int] = {}
             for record in records:
@@ -662,45 +793,13 @@ def crawl_nearby(session, destination: Destination) -> list[dict]:
     return []
 
 
-def collect_existing_trace_records(base_dir: Path = BASE_DIR) -> list[dict]:
-    """기존 설화·민속 결과를 읽어 두 관광지와 직접 관련된 항목만 재분류합니다."""
-    records: list[dict] = []
-    for filename in ("nculture.json", "folkency.json", "encykorea.json"):
-        path = base_dir / "output" / filename
-        if not path.exists():
-            continue
-        try:
-            existing = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as error:
-            print(f"  [경고] 기존 결과를 읽지 못했습니다: {path} ({error})")
-            continue
-
-        for original in existing:
-            haystack = f"{original.get('제목', '')}\n{original.get('본문', '')}"
-            for destination in DESTINATIONS.values():
-                if not any(term in haystack for term in destination.match_terms):
-                    continue
-                copied = dict(original)
-                copied["제목"] = f"{destination.name} | 설화·민속·관련 역사 | {original.get('제목', '')}"
-                enrich_record(
-                    copied,
-                    destination=destination,
-                    category="설화·민속·관련 역사",
-                    volatile=False,
-                    method=f"기존 TRACE {filename} 결과 재분류",
-                )
-                records.append(copied)
-                break
-    return records
-
-
 def main() -> None:
     install_cache()
     session = new_session()
     records: list[dict] = []
     failed = 0
 
-    print(f"[1/3] 선별한 공식·공공 페이지 {len(PAGE_SOURCES)}건을 수집합니다...")
+    print(f"[1/2] 선별한 공식·공공 페이지 {len(PAGE_SOURCES)}건을 수집합니다...")
     for index, source in enumerate(PAGE_SOURCES, start=1):
         print(f"  [{index}/{len(PAGE_SOURCES)}] {source.title_hint}")
         try:
@@ -714,7 +813,7 @@ def main() -> None:
             failed += 1
             print(f"    [오류] {error}")
 
-    print("[2/3] OpenStreetMap에서 주변 가게·음식·명소를 찾습니다...")
+    print("[2/2] OpenStreetMap에서 주변 가게·음식·명소를 찾습니다...")
     for destination in DESTINATIONS.values():
         try:
             nearby = crawl_nearby(session, destination)
@@ -723,11 +822,6 @@ def main() -> None:
         except Exception as error:
             failed += 1
             print(f"  [오류] {destination.name} 반경 검색 실패: {error}")
-
-    print("[3/3] 기존 TRACE 설화·민속 결과에서 직접 관련 자료를 합칩니다...")
-    reused = collect_existing_trace_records()
-    records.extend(reused)
-    print(f"  -> {len(reused)}건 재분류")
 
     out_path = save_records(
         records,

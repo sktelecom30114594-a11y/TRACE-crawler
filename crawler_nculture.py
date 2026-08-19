@@ -68,7 +68,12 @@ STORY_PAGE_URL_TMPL = "https://ncms.nculture.org/traditional-stories/story/{id}"
 SEARCH_PAGE_SIZE = 50
 MAX_SEARCH_PAGES = 200
 
-TARGET_CITY_PATTERN = re.compile(r"(?:전라남도\s*)?(?:여수|순천)시")
+def build_target_city_pattern(keywords: tuple[str, ...]) -> re.Pattern[str]:
+    cities = "|".join(re.escape(keyword) for keyword in keywords)
+    return re.compile(rf"(?:전라남도\s*)?(?:{cities})시")
+
+
+TARGET_CITY_PATTERN = build_target_city_pattern(REGION_KEYWORDS)
 SURVEY_LOCATION_PATTERN = re.compile(
     r"^\s*조사\s*장소\s*[:：]\s*(.+)$",
     re.MULTILINE,
@@ -171,6 +176,14 @@ def is_target_region_story(record: dict) -> bool:
     title = record.get("제목", "") or ""
     body = record.get("본문", "") or ""
 
+    # 상세 API가 주는 구조화 지역정보가 있으면 조사장소 문자열보다 우선합니다.
+    # 예: 본문에는 "광촌리 1구"만 있지만 API의 city/address는 "나주시"로 명시됩니다.
+    metadata_region = " ".join(
+        str(record.get(key, "") or "") for key in ("_지역도시", "_지역주소")
+    )
+    if metadata_region.strip():
+        return bool(TARGET_CITY_PATTERN.search(metadata_region))
+
     location_match = SURVEY_LOCATION_PATTERN.search(body)
     if location_match:
         return bool(TARGET_CITY_PATTERN.search(location_match.group(1)))
@@ -202,7 +215,11 @@ def crawl_one_story(session, story_id: int) -> dict | None:
     if not title or not body:
         return None
 
-    return make_record(
+    address = content.get("address") or ""
+    if address:
+        body = f"[조사 지역]\n{address}\n\n{body}"
+
+    record = make_record(
         title=title,
         body=body,
         source_url=STORY_PAGE_URL_TMPL.format(id=story_id),
@@ -210,6 +227,10 @@ def crawl_one_story(session, story_id: int) -> dict | None:
         license_note=LICENSE_NOTE_TEMPLATE.format(title=title),
         data_type="text",
     )
+    city = content.get("city") or {}
+    record["_지역도시"] = city.get("name") or ""
+    record["_지역주소"] = address
+    return record
 
 
 def main():
@@ -239,7 +260,15 @@ def main():
     kept = [record for record in all_records if is_target_region_story(record)]
     dropped = len(all_records) - len(kept)
     if dropped:
-        print(f"  [필터] 여수/순천과 무관한 {dropped}건은 저장하지 않았습니다.")
+        print(
+            f"  [필터] 대상 지역({', '.join(REGION_KEYWORDS)})과 무관한 "
+            f"{dropped}건은 저장하지 않았습니다."
+        )
+
+    # 필터 판정에만 쓰는 내부 메타데이터는 공통 출력 스키마에 남기지 않습니다.
+    for record in kept:
+        record.pop("_지역도시", None)
+        record.pop("_지역주소", None)
 
     out_path = save_records(
         kept, "nculture.json", merge_existing=failed > 0

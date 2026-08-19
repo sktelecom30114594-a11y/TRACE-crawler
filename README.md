@@ -38,6 +38,25 @@ python api_grandculture.py
 python crawler_destinations.py
 ```
 
+### 나주·목포 컬렉션
+
+기존 여수·순천 결과를 보존하면서 나주·목포를 수집하려면 같은 PowerShell 세션에서
+다음 환경변수를 지정합니다. 결과는 `output/naju_mokpo/`에 따로 저장됩니다.
+
+```powershell
+$env:CRAWLER_REGION_KEYWORDS = "나주,목포"
+$env:CRAWLER_OUTPUT_COLLECTION = "naju_mokpo"
+$env:CRAWLER_FOLKENCY_INCLUDE_CONTENT = "1"
+python crawler_folkency.py
+python crawler_nculture.py
+python crawler_encykorea.py
+python crawler_destinations.py
+```
+
+관광지 심화 수집의 기준점은 나주읍성과 목포진이며, 각각 2km 반경의 공개
+OpenStreetMap 정보를 함께 수집합니다. 환경변수를 지정하지 않으면 기존처럼
+여수·순천 및 `output/`을 사용합니다.
+
 운영자 연락처를 User-Agent에 넣으려면 `.env.example`을 `.env`로 복사하고
 `CRAWLER_CONTACT_EMAIL`을 실제 연락 가능한 주소로 바꾸세요. `.env`는 Git에
 올라가지 않습니다.
@@ -66,16 +85,17 @@ python crawler_destinations.py
 `지역`, `카테고리`, `정보성격`, `수집방식`, `게임활용태그`, `검수상태`가 추가됩니다.
 주변 장소에는 가능한 경우 `거리_m`, `위도`, `경도`도 포함됩니다.
 
-### 이순신광장·낙안읍성 심화 수집
+### 관광지 심화 수집 (이순신광장·낙안읍성·나주읍성·목포진)
 
-`crawler_destinations.py`는 다음 자료를 `output/destinations.json` 하나로 합칩니다.
+`crawler_destinations.py`는 다음 자료를 `output/destinations.json`(또는 컬렉션별 하위 폴더)
+하나로 합칩니다.
 
-- 여수시·순천시의 선별 공식 페이지: 역사, 인물, 공간,
+- 각 관광지의 선별 공식 페이지: 역사, 인물, 공간,
   비문과 상징물, 관람 동선, 체험, 민속, 축제, 교통
-- OpenStreetMap Overpass 반경 검색: 이순신광장 1.5km, 낙안읍성 2km 안의 음식점,
-  상점, 시장, 숙박, 인접 관광지와 각 장소의 거리·좌표
-- 기존 `folkency.json`, `nculture.json`, `encykorea.json` 중 이순신·전라좌수영·
-  거북선·진남관·고소대 또는 낙안읍성·임경업·김빈길과 직접 관련된 항목
+- OpenStreetMap Overpass 반경 검색: 이순신광장 1.5km, 낙안읍성·나주읍성·목포진 2km 안의
+  음식점, 상점, 시장, 숙박, 인접 관광지와 각 장소의 거리·좌표
+- 설화·민속 원문은 기존 `folkency.json`, `nculture.json`, `encykorea.json`에
+  유지하고, `destinations.json`에는 같은 원문을 중복 복사하지 않음
 
 영업시간, 휴무, 전화번호, 입장료, 행사 일정은 변동 정보로 분류되며 게임 공개나
 지역 가게와의 제휴 전에 공식 채널과 현장에서 다시 확인해야 합니다. 반경 검색은
@@ -93,18 +113,27 @@ python crawler_destinations.py
 
 기본값은 사이트의 표제어 검색 인덱스를 조회한 뒤 상세 API로 전문을 받습니다.
 전국 공통 민속에서 여수·순천 사례가 언급된 자료까지 필요하면
-`crawler_folkency.py`의 `SEARCH_INDEXES`에 `nfmw_content_2025`를 추가할 수
-있습니다. 이 모드는 재현율은 높지만 수동 검수가 필요합니다.
+`CRAWLER_FOLKENCY_INCLUDE_CONTENT=1`을 설정할 수 있습니다. 본문 검색 결과는
+참고문헌·출처 절을 제외하고, 행정구역·지역 맥락이 확인되며 지명이 제목에 있거나
+본문 검색 절에서 두 번 이상 등장하는 항목만 남깁니다. 그래도 전국 공통 민속의
+지역사례가 포함되므로 결과의 제목과 본문을 함께 확인해야 합니다. 같은 제목의
+개정 판본은 정규화한 본문 유사도가 70% 이상이면 더 긴 판본 하나만 보존합니다.
 공식 안내에 따르면 텍스트는 공공누리 제2유형(출처표시·상업적 이용금지)입니다.
 사진과 동영상은 개별 저작권이 다르므로 이 프로젝트는 텍스트만 저장합니다.
 
 공식 안내: <https://folkency.nfm.go.kr/overview>
 
+서버 부하를 더 낮춰 재수집하려면 `CRAWLER_REQUEST_DELAY_MIN`과
+`CRAWLER_REQUEST_DELAY_MAX`에 초 단위 값을 지정할 수 있습니다. 예를 들어
+각 실제 네트워크 요청 사이를 3~5초로 두려면 각각 `3`, `5`로 설정합니다.
+
 ### 지역N문화
 
 `여수`와 `순천`으로 검색한 설화 상세 본문을 저장합니다. 콘텐츠별 저작권 주체와
 이용조건이 다를 수 있어 결과에 `이용조건 개별 확인 필요`라고 표시합니다. 실제
-재사용 전 각 원문 페이지의 저작권 표시를 확인해야 합니다.
+재사용 전 각 원문 페이지의 저작권 표시를 확인해야 합니다. 상세 API에 구조화된
+조사 주소가 있으면 본문 맨 앞에 `[조사 지역]`으로 함께 저장하고, 지역 판정에도
+이 주소를 우선 사용합니다.
 
 ### 한국민족문화대백과사전
 

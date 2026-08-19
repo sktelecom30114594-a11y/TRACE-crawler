@@ -46,6 +46,7 @@ import sys
 from bs4 import BeautifulSoup
 
 from config import (
+    REGION_KEYWORDS,
     filter_by_region,
     install_cache,
     make_record,
@@ -61,13 +62,17 @@ SOURCE_NAME = "한국민족문화대백과사전"
 # (사용자가 직접 확인해 알려준 형식 그대로 사용)
 LICENSE_NOTE_TEMPLATE = "[출처 : {title} - 한국민족문화대백과사전]"
 
-# TODO: 여기에 실제로 수집할 encykorea 항목(여수/순천 관련) URL을 채워 넣으세요.
-# "여수시" 항목(E0036392)은 실제로 여수를 다루므로 filter_by_region을 통과하지만,
-# 다른 지역 항목을 넣을 때를 대비해 필터는 항상 적용합니다.
-TARGET_URLS = [
-    "https://encykorea.aks.ac.kr/Article/E0036392",  # 여수시
-    "https://encykorea.aks.ac.kr/Article/E0031987",  # 순천시(전라남도)
-]
+TARGET_URLS_BY_REGION = {
+    frozenset(("여수", "순천")): [
+        "https://encykorea.aks.ac.kr/Article/E0036392",  # 여수시
+        "https://encykorea.aks.ac.kr/Article/E0031987",  # 순천시(전라남도)
+    ],
+    frozenset(("나주", "목포")): [
+        "https://encykorea.aks.ac.kr/Article/E0011489",  # 나주시
+        "https://encykorea.aks.ac.kr/Article/E0018735",  # 목포시
+    ],
+}
+TARGET_URLS = TARGET_URLS_BY_REGION.get(frozenset(REGION_KEYWORDS), [])
 
 
 def find_legend_section(soup: BeautifulSoup):
@@ -141,7 +146,8 @@ def crawl_one(session, url: str) -> dict | None:
 def main():
     if not TARGET_URLS:
         print(
-            "[안내] TARGET_URLS가 비어 있습니다. 여수/순천 관련 encykorea 항목 URL을 "
+            f"[안내] TARGET_URLS가 비어 있습니다. {'/'.join(REGION_KEYWORDS)} 관련 "
+            "encykorea 항목 URL을 "
             "채워 넣은 뒤 다시 실행하세요."
         )
         sys.exit(1)
@@ -163,7 +169,10 @@ def main():
 
     kept, dropped = filter_by_region(records)
     if dropped:
-        print(f"  [필터] 여수/순천과 무관한 {dropped}건은 저장하지 않았습니다.")
+        print(
+            f"  [필터] 대상 지역({', '.join(REGION_KEYWORDS)})과 무관한 "
+            f"{dropped}건은 저장하지 않았습니다."
+        )
 
     out_path = save_records(kept, "encykorea.json")
     report_and_exit(out_path, len(kept), failed)

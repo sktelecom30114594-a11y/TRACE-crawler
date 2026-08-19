@@ -40,7 +40,18 @@ USER_AGENT = f"TRACE-project-crawler (educational/non-commercial research; conta
 # 요청 사이에 줄 딜레이(초). 매 요청마다 이 범위에서 랜덤하게 하나를 골라 sleep합니다.
 # 랜덤으로 주는 이유: 모든 요청이 정확히 1.5초 간격이면 오히려 "봇처럼" 보이기 쉽고,
 # 서버 입장에서도 일정한 간격보다 약간 흔들리는 편이 부담이 덜합니다.
-REQUEST_DELAY_RANGE = (1.5, 2.0)
+def _read_request_delay_range() -> tuple[float, float]:
+    """환경변수로 요청 간격을 늘릴 수 있게 하되 잘못된 값은 즉시 거부합니다."""
+    minimum = float(os.environ.get("CRAWLER_REQUEST_DELAY_MIN", "1.5"))
+    maximum = float(os.environ.get("CRAWLER_REQUEST_DELAY_MAX", "2.0"))
+    if minimum < 0 or maximum < minimum:
+        raise ValueError(
+            "CRAWLER_REQUEST_DELAY_MIN/MAX는 0 이상이고 최솟값 <= 최댓값이어야 합니다."
+        )
+    return minimum, maximum
+
+
+REQUEST_DELAY_RANGE = _read_request_delay_range()
 
 # 429(Too Many Requests)나 5xx 응답을 받았을 때 재시도할 횟수와 백오프 배율.
 # urllib3 Retry가 내부적으로 지수 백오프(backoff_factor * 2**(재시도횟수-1))로 대기하며,
@@ -63,18 +74,32 @@ CACHE_IGNORED_PARAMETERS = (
     "apikey",
 )
 
-# 이 프로젝트의 최종 수집 대상 지역. 크롤러가 실제로 저장하기 직전에
-# 제목+본문에 이 키워드가 하나도 없는 레코드는 걸러내는 안전장치로 씁니다.
-# (예: 지역N문화 태그 페이지 하나에 완도/신안 등 다른 지역 이야기가 섞여 나오는 경우)
-REGION_KEYWORDS = ("여수", "순천")
+# 이 프로젝트의 최종 수집 대상 지역. 기본값은 기존 여수·순천이며, 실행할 때
+# CRAWLER_REGION_KEYWORDS="나주,목포"처럼 지정하면 기존 코드를 건드리지 않고
+# 다른 지역 컬렉션을 만들 수 있습니다.
+_region_keywords = os.environ.get("CRAWLER_REGION_KEYWORDS", "여수,순천")
+REGION_KEYWORDS = tuple(
+    keyword.strip() for keyword in _region_keywords.split(",") if keyword.strip()
+)
+if not REGION_KEYWORDS:
+    raise ValueError("CRAWLER_REGION_KEYWORDS에는 지역명을 하나 이상 지정해야 합니다.")
 
 # ---------------------------------------------------------------------------
 # 2. 경로 / 저장소 설정
 # ---------------------------------------------------------------------------
 
 BASE_DIR = Path(__file__).resolve().parent
-OUTPUT_DIR = BASE_DIR / "output"
-OUTPUT_DIR.mkdir(exist_ok=True)
+OUTPUT_ROOT = BASE_DIR / "output"
+OUTPUT_COLLECTION = os.environ.get("CRAWLER_OUTPUT_COLLECTION", "").strip()
+if OUTPUT_COLLECTION and not all(
+    character.isalnum() or character in {"-", "_"}
+    for character in OUTPUT_COLLECTION
+):
+    raise ValueError(
+        "CRAWLER_OUTPUT_COLLECTION은 영문·숫자·하이픈·밑줄만 사용할 수 있습니다."
+    )
+OUTPUT_DIR = OUTPUT_ROOT / OUTPUT_COLLECTION if OUTPUT_COLLECTION else OUTPUT_ROOT
+OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 # requests-cache가 만드는 캐시 DB 파일 (sqlite). 한 번 받은 페이지는 이 파일에
 # 저장되고, 같은 URL을 다시 요청하면 실제 네트워크 요청 없이 캐시에서 즉시 반환됩니다.

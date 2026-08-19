@@ -86,6 +86,8 @@ filter_by_region()으로 실제 제목+본문에 "여수"/"순천"이 있는 것
     사용합니다.
 """
 
+import difflib
+import os
 import re
 import sys
 
@@ -115,6 +117,10 @@ SEARCH_API_URL_TMPL = "https://folkency.nfm.go.kr/api/v1/_search/{index}"
 # 후보가 훨씬 많아지지만, "사처방"처럼 전국구 개념이 [지역사례] 절에서 여수/순천을
 # 다른 지역과 나란히 스쳐 언급한 것까지 섞여 들어와 정확도가 크게 떨어집니다.
 SEARCH_INDEXES = ("nfmw_topic_2025",)
+if os.environ.get("CRAWLER_FOLKENCY_INCLUDE_CONTENT", "").lower() in {
+    "1", "true", "yes", "on"
+}:
+    SEARCH_INDEXES += ("nfmw_content_2025",)
 SEARCH_PAGE_SIZE = 50
 MAX_SEARCH_PAGES = 200
 
@@ -122,7 +128,7 @@ MAX_SEARCH_PAGES = 200
 # 예를 들어 "여수・순천 민요집"처럼 무관한 전국구 항목의 참고문헌에 지명이 우연히
 # 들어가는 경우가 많습니다. 이 섹션을 그대로 포함하면 filter_by_region()이
 # 참고문헌 인용만 보고도 통과시켜버려 사실상 안전장치가 무력화됩니다.
-EXCLUDED_SECTIONS = {"참고문헌"}
+EXCLUDED_SECTIONS = {"참고문헌", "출처"}
 
 # topic_seq 추출용 정규식: URL 어디에 있든 "/detail/숫자" 패턴을 찾음
 TOPIC_SEQ_PATTERN = re.compile(r"/detail/(\d+)")
@@ -131,6 +137,84 @@ TOPIC_SEQ_PATTERN = re.compile(r"/detail/(\d+)")
 # 여기에 URL을 직접 채워 넣으세요(자동 검색을 건너뛰고 이 목록만 사용합니다).
 #   "https://folkency.nfm.go.kr/topic/detail/6570",  # 구조 확인용 샘플 (문배)
 TARGET_URLS: list[str] = []
+
+# 제목·본문 검색에는 잡히지만 사람이 본문을 검토해 제외하기로 확정한 항목입니다.
+# 다른 지역이 본론이거나, 대상 지역이 단순 공급지·생산지로만 언급되거나,
+# 현재 컬렉션의 활용 범위에서 사용하지 않기로 한 자료를 근거와 함께 기록합니다.
+# 재수집할 때마다 같은 항목이 되살아나지 않게 topic_seq 단계에서 제외합니다.
+EXCLUDED_TOPIC_SEQS: dict[int, str] = {
+    5333: (
+        "나주기민창본풀이 - [정의]에 '제주도 제주시 조천면 선흘리 안씨 댁 조상신의 "
+        "내력을 구술하는 조상신본풀이'라 명시된 제주도 조상신본풀이. 나주는 이야기 "
+        "속 곡식 창고(기민창)의 소재지로만 등장하며 실제 민속 주체는 제주도임 "
+        "(2026-08-19 검토)."
+    ),
+    12275: (
+        "나주기민창본풀이(다른 판본) - topic_seq 5333과 같은 표제어의 다른 판본으로, "
+        "역시 [정의]에 '제주특별자치도 제주시 조천면 선흘리 안씨댁 조상신의 내력을 "
+        "구술하는 조상신본풀이'라 명시됨. 같은 사유로 제외 (2026-08-19 검토)."
+    ),
+    7006: "무명 - 사용자 요청으로 나주·목포 컬렉션 활용 범위에서 제외 (2026-08-19).",
+    7196: "쪽 - 사용자 요청으로 나주·목포 컬렉션 활용 범위에서 제외 (2026-08-19).",
+    7591: "무 - 사용자 요청으로 나주·목포 컬렉션 활용 범위에서 제외 (2026-08-19).",
+    8178: "홍어 - 사용자 요청으로 나주·목포 컬렉션 활용 범위에서 제외 (2026-08-19).",
+    9642: (
+        "토굴새우젓 - 본론은 충남 광천·인천 부평의 숙성 문화이고 목포는 젓새우 "
+        "공급지로만 언급되어 제외 (2026-08-19 검토)."
+    ),
+    9907: (
+        "대나무 - 전국 대나무 문화가 본론이며 나주는 역사적 생산품 목록에만 "
+        "등장하여 제외 (2026-08-19 검토)."
+    ),
+    9953: "무명(다른 판본) - 사용자 요청으로 함께 제외 (2026-08-19).",
+}
+
+
+def exclude_known_false_positives(seqs: set[int]) -> set[int]:
+    """표제어에는 지역명이 있지만 실제로는 다른 지역 민속인 항목을 제거합니다."""
+    return seqs - set(EXCLUDED_TOPIC_SEQS)
+
+
+def normalize_comparison_text(text: str) -> str:
+    """공백·문장부호·섹션 표기를 제외해 판본 간 내용 유사도를 비교합니다."""
+    return re.sub(r"[^0-9A-Za-z가-힣]", "", text or "")
+
+
+def deduplicate_near_identical_records(
+    records: list[dict], similarity_threshold: float = 0.70
+) -> tuple[list[dict], int]:
+    """같은 제목의 개정·중복 판본 중 본문이 더 긴 레코드만 남깁니다."""
+    kept: list[dict] = []
+    dropped = 0
+    for record in records:
+        title = (record.get("제목") or "").strip()
+        body = record.get("본문") or ""
+        normalized = normalize_comparison_text(body)
+
+        duplicate_index = None
+        for index, existing in enumerate(kept):
+            if (existing.get("제목") or "").strip() != title:
+                continue
+            existing_normalized = normalize_comparison_text(existing.get("본문") or "")
+            similarity = difflib.SequenceMatcher(
+                None,
+                existing_normalized,
+                normalized,
+                autojunk=False,
+            ).ratio()
+            if similarity >= similarity_threshold:
+                duplicate_index = index
+                break
+
+        if duplicate_index is None:
+            kept.append(record)
+            continue
+
+        dropped += 1
+        if len(body) > len(kept[duplicate_index].get("본문") or ""):
+            kept[duplicate_index] = record
+
+    return kept, dropped
 
 
 def discover_topic_seqs(session, keywords: tuple[str, ...] = REGION_KEYWORDS) -> list[int]:
@@ -141,6 +225,7 @@ def discover_topic_seqs(session, keywords: tuple[str, ...] = REGION_KEYWORDS) ->
     있으므로 결과를 별도로 검수해야 합니다.
     """
     seqs: set[int] = set()
+    broad_candidates: dict[tuple[str, int], dict] = {}
 
     for index in SEARCH_INDEXES:
         url = SEARCH_API_URL_TMPL.format(index=index)
@@ -168,8 +253,22 @@ def discover_topic_seqs(session, keywords: tuple[str, ...] = REGION_KEYWORDS) ->
                     seq = hit.get("topic_seq")
                     # 참고문헌 섹션만 매칭된 경우는 후보에서 제외합니다(같은 topic_seq가
                     # 다른 섹션에서도 매칭되면 그 히트를 통해 정상적으로 포함됩니다).
-                    if seq is not None and hit.get("dic_subname") not in EXCLUDED_SECTIONS:
+                    if seq is None or hit.get("dic_subname") in EXCLUDED_SECTIONS:
+                        continue
+
+                    if index != "nfmw_content_2025":
                         seqs.add(seq)
+                        continue
+
+                    title = hit.get("dic_subject_kr") or hit.get("display_subject") or ""
+                    content = hit.get("dic_content") or ""
+                    if not is_strong_regional_search_hit(keyword, title, content):
+                        continue
+                    candidate = broad_candidates.setdefault(
+                        (keyword, int(seq)),
+                        {"title": title, "mentions": 0},
+                    )
+                    candidate["mentions"] += content.count(keyword)
 
                 if not hits or page * SEARCH_PAGE_SIZE >= total:
                     break
@@ -180,7 +279,27 @@ def discover_topic_seqs(session, keywords: tuple[str, ...] = REGION_KEYWORDS) ->
                     f"index={index}, keyword={keyword}"
                 )
 
-    return sorted(seqs)
+    for (keyword, seq), candidate in broad_candidates.items():
+        title = candidate["title"]
+        # 제주 본풀이 등에서 역사적 인물의 출신지로만 등장하는 경우를 제외합니다.
+        if "본풀이" in title and keyword not in title:
+            continue
+        if keyword in title or candidate["mentions"] >= 2:
+            seqs.add(seq)
+
+    return sorted(exclude_known_false_positives(seqs))
+
+
+def is_strong_regional_search_hit(keyword: str, title: str, content: str) -> bool:
+    """본문 검색의 대학명·참고문헌·단순 성씨 언급을 줄이는 1차 맥락 필터입니다."""
+    if keyword in title:
+        return True
+    context_pattern = re.compile(
+        rf"(?:전라남도|전남)\s*{re.escape(keyword)}(?:시)?|"
+        rf"{re.escape(keyword)}시|{re.escape(keyword)}\s*지역|"
+        rf"{re.escape(keyword)}(?:에서|에는|에서는|로서|의\s+(?:대표|명물|특산|전통))"
+    )
+    return bool(context_pattern.search(content))
 
 
 def extract_topic_seq(url: str) -> str | None:
@@ -276,7 +395,17 @@ def main():
 
     kept, dropped = filter_by_region(records)
     if dropped:
-        print(f"  [필터] 여수/순천과 무관한 {dropped}건은 저장하지 않았습니다.")
+        print(
+            f"  [필터] 대상 지역({', '.join(REGION_KEYWORDS)})과 무관한 "
+            f"{dropped}건은 저장하지 않았습니다."
+        )
+
+    kept, duplicate_count = deduplicate_near_identical_records(kept)
+    if duplicate_count:
+        print(
+            f"  [중복 제거] 같은 제목과 유사 본문을 가진 판본 "
+            f"{duplicate_count}건을 저장하지 않았습니다."
+        )
 
     # 상세 수집이 하나라도 실패했으면 기존 정상 결과를 보존하며 병합합니다.
     # 모두 성공한 전체 검색 실행만 스냅샷으로 교체해 오래된 항목을 정리합니다.

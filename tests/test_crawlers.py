@@ -35,6 +35,36 @@ class EncyKoreaParserTests(unittest.TestCase):
 
 
 class FolkEncyParserTests(unittest.TestCase):
+    def test_deduplicates_near_identical_same_title_and_keeps_longer_body(self):
+        records = [
+            {"제목": "나주기민창본풀이", "본문": "가나다라마바사"},
+            {"제목": "나주기민창본풀이", "본문": "가나다라마바사 아자차"},
+            {"제목": "다른 항목", "본문": "가나다라마바사"},
+        ]
+
+        kept, dropped = crawler_folkency.deduplicate_near_identical_records(
+            records, similarity_threshold=0.7
+        )
+
+        self.assertEqual(dropped, 1)
+        self.assertEqual(len(kept), 2)
+        self.assertEqual(kept[0]["본문"], "가나다라마바사 아자차")
+
+    def test_deduplicates_revised_same_title_editions_by_default(self):
+        original = {"제목": "무명", "본문": "나주 무명의 역사와 제작 과정 " * 10}
+        revised = {
+            "제목": "무명",
+            "본문": "나주 무명의 역사와 전통 제작 과정 " * 10 + "추가 설명",
+        }
+
+        kept, dropped = crawler_folkency.deduplicate_near_identical_records(
+            [original, revised]
+        )
+
+        self.assertEqual(len(kept), 1)
+        self.assertEqual(dropped, 1)
+        self.assertEqual(kept[0]["본문"], revised["본문"])
+
     def test_extracts_topic_sequence_from_localized_url(self):
         url = "https://folkency.nfm.go.kr/KR/topic/detail/6570"
         self.assertEqual(crawler_folkency.extract_topic_seq(url), "6570")
@@ -43,6 +73,16 @@ class FolkEncyParserTests(unittest.TestCase):
         self.assertIsNone(
             crawler_folkency.extract_topic_seq("https://folkency.nfm.go.kr/topic")
         )
+
+    def test_excludes_reviewed_topics_but_keeps_approved_regional_case(self):
+        excluded = {5333, 7006, 7196, 7591, 8178, 9642, 9907, 9953, 12275}
+        seqs = {*excluded, 3791, 5552}
+
+        kept = crawler_folkency.exclude_known_false_positives(seqs)
+
+        self.assertTrue(excluded.isdisjoint(kept))
+        self.assertIn(3791, kept)  # 모래찜질: 경계선이지만 이번 복구 대상
+        self.assertIn(5552, kept)  # 삼학도: 목포 직접 설화
 
     def test_crawl_excludes_bibliography_section(self):
         class Response:
@@ -83,6 +123,13 @@ class FolkEncyParserTests(unittest.TestCase):
 
 
 class NCultureParserTests(unittest.TestCase):
+    def test_builds_city_pattern_for_naju_and_mokpo_profile(self):
+        pattern = crawler_nculture.build_target_city_pattern(("나주", "목포"))
+
+        self.assertIsNotNone(pattern.search("전라남도 나주시 금천면"))
+        self.assertIsNotNone(pattern.search("목포시 만호동"))
+        self.assertIsNone(pattern.search("순천시 낙안면"))
+
     def test_parses_story_body_and_skips_duplicate_heading_and_image_marker(self):
         title, body = crawler_nculture.parse_story_detail(
             {
@@ -133,6 +180,16 @@ class NCultureParserTests(unittest.TestCase):
 
         self.assertFalse(crawler_nculture.is_target_region_story(record))
 
+    def test_keeps_story_using_structured_city_metadata(self):
+        record = {
+            "제목": "마을 설화",
+            "본문": "조사 장소 : 낙안면 어느 마을",
+            "_지역도시": "순천시",
+            "_지역주소": "전남 순천시 낙안면",
+        }
+
+        self.assertTrue(crawler_nculture.is_target_region_story(record))
+
 
 class GrandCultureConfigurationTests(unittest.TestCase):
     def test_skeleton_refuses_to_send_request(self):
@@ -141,6 +198,38 @@ class GrandCultureConfigurationTests(unittest.TestCase):
 
 
 class DestinationCrawlerTests(unittest.TestCase):
+    def test_deduplicates_nearby_same_named_osm_objects_and_keeps_richer_one(self):
+        sparse = {
+            "제목": "나주읍성 | 주변 먹거리 | 같은집",
+            "본문": "짧음",
+            "위도": 35.0322,
+            "경도": 126.7170,
+        }
+        rich = {
+            "제목": "나주읍성 | 주변 먹거리 | 같은집",
+            "본문": "전화번호와 주소가 있는 더 긴 본문",
+            "위도": 35.0323,
+            "경도": 126.7170,
+        }
+        distant = {
+            "제목": "나주읍성 | 주변 먹거리 | 같은집",
+            "본문": "멀리 있는 별도 지점",
+            "위도": 35.04,
+            "경도": 126.7170,
+        }
+
+        kept, dropped = crawler_destinations.deduplicate_nearby_records(
+            [sparse, rich, distant]
+        )
+
+        self.assertEqual(dropped, 1)
+        self.assertEqual(len(kept), 2)
+        self.assertEqual(kept[0]["본문"], rich["본문"])
+
+    def test_registers_naju_and_mokpo_destinations(self):
+        self.assertIn("나주읍성", crawler_destinations.ALL_DESTINATIONS)
+        self.assertIn("목포진", crawler_destinations.ALL_DESTINATIONS)
+
     def test_extracts_focused_main_content_and_preserves_table_rows(self):
         html = """
         <html><head><meta property="og:title" content="낙안읍성 체험"></head>
